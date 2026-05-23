@@ -4,10 +4,10 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// Arreglo para almacenar el historial de datos (guardamos hasta las últimas 20 lecturas)
+// Arreglo para almacenar el historial de datos (últimas 20 lecturas)
 let historialDatos = [];
 
-// Ruta para mostrar la página web (GET /)
+// Ruta principal para mostrar la página web (GET /)
 app.get('/', (req, res) => {
     const htmlResponse = `
     <!DOCTYPE html>
@@ -117,40 +117,42 @@ app.get('/', (req, res) => {
                     const historial = await response.json();
                     
                     if (historial.length > 0) {
-                        // El último dato recibido es el más reciente (está al final del arreglo)
                         const masReciente = historial[historial.length - 1];
                         document.getElementById('temp-val').innerText = masReciente.temperatura.toFixed(1) + ' °C';
                         document.getElementById('hum-val').innerText = masReciente.humedad.toFixed(0) + ' %';
 
-                        // Calcular la media (promedio) de todo el historial acumulado
+                        // Calcular promedios
                         let sumaTemp = 0;
                         let sumaHum = 0;
-                        historial.forEach(d => {
-                            sumaTemp += d.temperatura;
-                            sumaHum += d.humedad;
-                        });
+                        for (let i = 0; i < historial.length; i++) {
+                            sumaTemp += historial[i].temperatura;
+                            sumaHum += historial[i].humedad;
+                        }
                         const promedioTemp = sumaTemp / historial.length;
                         const promedioHum = sumaHum / historial.length;
 
                         document.getElementById('temp-avg').innerText = promedioTemp.toFixed(1) + ' °C';
                         document.getElementById('hum-avg').innerText = promedioHum.toFixed(0) + ' %';
 
-                        // Renderizar la tabla de historial (orden invertido para ver el más nuevo arriba)
+                        // Renderizar tabla (más reciente primero)
                         const historyBody = document.getElementById('history-body');
                         historyBody.innerHTML = '';
                         
-                        // Mostramos máximo las últimas 10 mediciones en la tabla visual
-                        const ultimasDiez = [...historial].reverse().slice(0, 10);
-                        
-                        ultimasDiez.forEach(item => {
+                        // Invertimos la lista para mostrar primero lo nuevo
+                        const listaInvertida = historial.slice().reverse();
+                        const limite = listaInvertida.length > 10 ? 10 : listaInvertida.length;
+
+                        for (let i = 0; i < limite; i++) {
+                            const item = listaInvertida[i];
                             const fila = document.createElement('tr');
-                            fila.innerHTML = \`
-                                <td>\${item.fecha}</td>
-                                <td style="color: #f75a68;">\${item.temperatura.toFixed(1)} °C</td>
-                                <td style="color: #00b37e;">\${item.humedad.toFixed(0)} %</td>
-                            \`;
+                            
+                            // Usamos concatenación clásica de texto para evitar errores de compilación
+                            fila.innerHTML = '<td>' + item.fecha + '</td>' +
+                                             '<td style="color: #f75a68;">' + item.temperatura.toFixed(1) + ' °C</td>' +
+                                             '<td style="color: #00b37e;">' + item.humedad.toFixed(0) + ' %</td>';
+                                             
                             historyBody.appendChild(fila);
-                        });
+                        }
                     }
                 } catch (error) {
                     console.error("Error al obtener datos:", error);
@@ -167,28 +169,32 @@ app.get('/', (req, res) => {
 
 // Ruta para recibir datos del ESP32 (POST /api/datos)
 app.post('/api/datos', (req, res) => {
-    const { temperatura, humidity, humedad } = req.body;
-    
-    // El ESP32 puede mandar el valor como "humedad" o "humidity"
-    const valHum = humedad !== undefined ? humedad : humidity;
+    const { temperatura, humedad } = req.body;
 
-    if (temperatura !== undefined && valHum !== undefined) {
+    if (temperatura !== undefined && humedad !== undefined) {
+        // Obtener hora local de Argentina
+        const fechaActual = new Date();
+        const horaString = fechaActual.toLocaleTimeString("es-AR", { 
+            hour: '2-digit', 
+            minute: '2-digit', 
+            second: '2-digit',
+            timeZone: "America/Argentina/Buenos_Aires"
+        });
+
         const nuevaLectura = {
             temperatura: parseFloat(temperatura),
-            humedad: parseFloat(valHum),
-            fecha: new Date().toLocaleTimeString("es-AR", { hour: '2-digit', minute: '2-digit', second: '2-digit' }) // Solo hora para la tabla
+            humedad: parseFloat(humedad),
+            fecha: horaString
         };
 
-        // Guardar en el arreglo
         historialDatos.push(nuevaLectura);
 
-        // Si supera las 20 lecturas, eliminamos la más antigua para mantener controlado el uso de memoria
         if (historialDatos.length > 20) {
             historialDatos.shift();
         }
 
-        console.log("Nueva lectura registrada:", nuevaLectura);
-        return res.status(200).send({ mensaje: "Dato agregado al historial" });
+        console.log("Dato guardado:", nuevaLectura);
+        return res.status(200).send({ mensaje: "Dato guardado" });
     }
     return res.status(400).send({ error: "Datos incorrectos" });
 });
